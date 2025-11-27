@@ -1,33 +1,22 @@
-import { KindleBook } from "./book.js";
-import { fetchBooks, toUrl } from "./fetch-books.js";
 import {
-  KindleRequiredCookies,
-  HttpClient,
-  TlsClientConfig,
-} from "./http-client.js";
-import { Filter, Query } from "./query-filter.js";
-
-export type {
-  KindleBook,
-  KindleBookDetails,
-  KindleBookData,
-  KindleBookLightDetails,
-  KindleAuthor,
-} from "./book.js";
-export type {
-  KindleOwnedBookMetadataResponse,
-  KindleBookMetadataResponse,
-} from "./book-metadata.js";
-
-export {
-  HttpClient,
+  fetchLibrary,
+  fetchBookDetails,
+  fetchFullBookDetails,
+} from "./api/library.js";
+import { fetchRenderChunk, type RenderChunkOptions } from "./api/render.js";
+import { postStillReading, type StillReadingOptions, type StillReadingResult } from "./api/still-reading.js";
+import {
   type KindleRequiredCookies,
+  HttpClient,
   type TlsClientConfig,
 } from "./http-client.js";
-export type {
-  TLSClientRequestPayload,
-  TLSClientResponseData,
-} from "./tls-client-api.js";
+import {
+  type KindleBook,
+  type KindleBookLightDetails,
+  type KindleBookDetails,
+} from "./models/book.js";
+import { type Filter, type Query } from "./models/query-filter.js";
+import { buildDeviceTokenUrl } from "./urls.js";
 
 export type KindleConfiguration = {
   /**
@@ -36,6 +25,12 @@ export type KindleConfiguration = {
    */
   cookies: KindleRequiredCookies | string;
   deviceToken: string;
+  /** Reader GUID captured from render/stillReading requests. */
+  guid?: string;
+  /** x-amz-rendering-token header value for renderer requests. */
+  renderingToken?: string;
+  /** Renderer revision (rId param) for renderer requests. */
+  rendererRevision?: string;
   // Optional
   clientVersion?: string;
   tlsServer: TlsClientConfig;
@@ -60,18 +55,6 @@ export type KindleFromCookieOptions = {
 };
 
 export class Kindle {
-  public static DEVICE_TOKEN_URL =
-    "https://read.amazon.com/service/web/register/getDeviceToken";
-  public static readonly BOOKS_URL =
-    "https://read.amazon.com/kindle-library/search?query=&libraryType=BOOKS&sortType=recency&querySize=50";
-  public static readonly DEFAULT_QUERY = Object.freeze({
-    sortType: "acquisition_desc",
-  } satisfies Query);
-  public static readonly DEFAULT_FILTER = Object.freeze({
-    querySize: 50,
-    fetchAllPages: false,
-  } satisfies Filter);
-
   /**
    * The default list of books fetched when setting up {@link Kindle}
    *
@@ -85,8 +68,6 @@ export class Kindle {
   constructor(
     private options: KindleOptions,
     client: HttpClient,
-    // not necessary for initialization (if called from the outside)
-    // so we're leaving this nullable
     prePopulatedBooks?: KindleBook[]
   ) {
     this.defaultBooks = prePopulatedBooks ?? [];
@@ -102,11 +83,21 @@ export class Kindle {
       config.clientFactory?.(cookies, config.tlsServer) ??
       new HttpClient(cookies, config.tlsServer);
 
-    const { sessionId, books } = await Kindle.baseRequest(client);
+    const { sessionId, books } = await fetchLibrary(client);
     client.updateSession(sessionId);
 
-    const deviceInfo = await Kindle.deviceToken(client, config.deviceToken);
+    const deviceInfo = await Kindle.fetchDeviceToken(client, config.deviceToken);
     client.updateAdpSession(deviceInfo.deviceSessionToken);
+
+    if (config.guid) {
+      client.updateGuid(config.guid);
+    }
+    if (config.renderingToken) {
+      client.updateRenderingToken(config.renderingToken);
+    }
+    if (config.rendererRevision) {
+      client.updateRendererRevision(config.rendererRevision);
+    }
 
     return new this(
       {
@@ -121,78 +112,13 @@ export class Kindle {
     );
   }
 
-  static async deviceToken(
+  static async fetchDeviceToken(
     client: HttpClient,
     token: string
   ): Promise<KindleDeviceInfo> {
-    const params = new URLSearchParams({
-      serialNumber: token,
-      deviceType: token,
-    });
-    const url = `${Kindle.DEVICE_TOKEN_URL}?${params.toString()}`;
+    const url = buildDeviceTokenUrl(token);
     const response = await client.request(url);
     return JSON.parse(response.body) as KindleDeviceInfo;
-  }
-
-  static async baseRequest(
-    client: HttpClient,
-    version?: string,
-    args?: {
-      query?: Query;
-      filter?: Filter;
-    }
-  ): Promise<{
-    books: KindleBook[];
-    sessionId: string;
-  }> {
-    const query = {
-      ...Kindle.DEFAULT_QUERY,
-      ...args?.query,
-    };
-    const filter = {
-      ...Kindle.DEFAULT_FILTER,
-      ...args?.filter,
-    };
-
-    let allBooks: KindleBook[] = [];
-    let latestSessionId: string | undefined;
-
-    // loop until we get less than the requested amount of books or hit the limit
-    do {
-      const url = toUrl(query, filter);
-      const { books, sessionId, paginationToken } = await fetchBooks(
-        client,
-        url,
-        version
-      );
-
-      latestSessionId = sessionId;
-
-      allBooks = [...allBooks, ...books];
-
-      // update offset
-      filter.paginationToken = paginationToken;
-    } while (
-      filter.paginationToken !== undefined &&
-      filter.fetchAllPages === true
-    );
-
-    return {
-      books: allBooks,
-      sessionId: latestSessionId,
-    };
-  }
-
-  async books(args?: {
-    query?: Query;
-    filter?: Filter;
-  }): Promise<KindleBook[]> {
-    const result = await Kindle.baseRequest(this.#client, undefined, args);
-    // refreshing the internal session every time books is called.
-    // This doesn't prevent us from calling the books endpoint but
-    // it does prevent requesting the metadata of individual books
-    this.options.sessionId = result.sessionId;
-    return result.books;
   }
 
   static deserializeCookies(cookies: string): KindleRequiredCookies {
@@ -210,6 +136,39 @@ export class Kindle {
       ubidMain: values["ubid-main"],
       xMain: values["x-main"],
     };
+  }
+
+  /** Fetches the user's Kindle library. */
+  async books(args?: {
+    query?: Query;
+    filter?: Filter;
+  }): Promise<KindleBook[]> {
+    const result = await fetchLibrary(this.#client, args);
+    this.options.sessionId = result.sessionId;
+    return result.books;
+  }
+
+  /** Fetches basic details about a book. */
+  async bookDetails(book: KindleBook): Promise<KindleBookLightDetails> {
+    return fetchBookDetails(this.#client, book);
+  }
+
+  /** Fetches full details about a book including reading progress percentage. */
+  async fullBookDetails(
+    book: KindleBook,
+    partialDetails?: KindleBookLightDetails
+  ): Promise<KindleBookDetails> {
+    return fetchFullBookDetails(this.#client, book, partialDetails);
+  }
+
+  /** Downloads a renderer chunk as a tar archive. */
+  async renderChunk(options: RenderChunkOptions): Promise<Buffer> {
+    return fetchRenderChunk(this.#client, options);
+  }
+
+  /** Notifies Amazon that the user is still reading at the given position. */
+  async stillReading(options: StillReadingOptions): Promise<StillReadingResult> {
+    return postStillReading(this.#client, options);
   }
 }
 

@@ -25,3 +25,6 @@ dist-ssr
 **/dist
 **/*.html
 **/*.env
+
+# Content downloads
+*.tar

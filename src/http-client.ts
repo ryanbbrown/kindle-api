@@ -15,6 +15,9 @@ const JSONP_REGEX = /\(({.*})\)/;
 export class HttpClient {
   private sessionId?: string;
   private adpSessionId?: string;
+  private guid?: string;
+  private renderingToken?: string;
+  private rendererRevision?: string;
 
   constructor(
     private readonly cookies: KindleRequiredCookies,
@@ -23,7 +26,7 @@ export class HttpClient {
 
   private async _request(
     url: string,
-    payload?: TLSClientRequestPayload
+    payload?: Partial<TLSClientRequestPayload>
   ): Promise<Response> {
     const headers: Record<string, string> = {
       Cookie: this.serializeCookies(),
@@ -40,21 +43,24 @@ export class HttpClient {
       headers["x-adp-session-token"] = this.adpSessionId;
     }
 
-    const body = JSON.stringify(
-      {
-        tlsClientIdentifier: "chrome_112",
-        requestUrl: url,
-        requestMethod: "GET",
-        withDebug: true,
-        headers,
-      } satisfies TLSClientRequestPayload,
-      null,
-      2
-    );
+    const tlsPayload: TLSClientRequestPayload = {
+      tlsClientIdentifier: "chrome_112",
+      requestUrl: url,
+      requestMethod: payload?.requestMethod ?? "GET",
+      withDebug: true,
+      headers,
+    };
+
+    if (payload?.requestBody) {
+      tlsPayload.requestBody = payload.requestBody;
+    }
+    if (payload?.isByteResponse) {
+      tlsPayload.isByteResponse = payload.isByteResponse;
+    }
 
     return fetch(`${this.clientOptions.url}/api/forward`, {
       method: "POST",
-      body,
+      body: JSON.stringify(tlsPayload, null, 2),
       headers: {
         "x-api-key": this.clientOptions.apiKey,
       },
@@ -63,12 +69,10 @@ export class HttpClient {
 
   public async request(
     url: string,
-    payload?: TLSClientRequestPayload
+    payload?: Partial<TLSClientRequestPayload>
   ): Promise<TLSClientResponseData> {
     const response = await this._request(url, payload);
-
     const json = await response.json();
-
     return json as TLSClientResponseData;
   }
 
@@ -85,16 +89,40 @@ export class HttpClient {
     this.sessionId = id;
   }
 
-  updateAdpSession(id: string): void {
-    this.adpSessionId = id;
-  }
-
   getSessionId(): string | undefined {
     return this.sessionId;
   }
 
+  updateAdpSession(id: string): void {
+    this.adpSessionId = id;
+  }
+
   getAdpSessionId(): string | undefined {
     return this.adpSessionId;
+  }
+
+  updateGuid(id: string): void {
+    this.guid = id;
+  }
+
+  getGuid(): string | undefined {
+    return this.guid;
+  }
+
+  updateRenderingToken(token: string): void {
+    this.renderingToken = token;
+  }
+
+  getRenderingToken(): string | undefined {
+    return this.renderingToken;
+  }
+
+  updateRendererRevision(revision: string): void {
+    this.rendererRevision = revision;
+  }
+
+  getRendererRevision(): string | undefined {
+    return this.rendererRevision;
   }
 
   extractSetCookies(response: TLSClientResponseData): Record<string, string> {

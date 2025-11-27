@@ -2,6 +2,8 @@
 
 A zero dependency, blazing fast library for Amazon Kindle's private API built without headless browsers.
 
+> TODO: update this to be consistent with the refactor
+
 ## Installation
 
 ```

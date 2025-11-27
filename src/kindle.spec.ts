@@ -5,7 +5,7 @@ import { useScenario } from "./__test__/scenario.js";
 import { singleBook } from "./__test__/scenarios/single-book.js";
 import { multiplePages } from "./__test__/scenarios/multiple-pages.js";
 import { startSession } from "./__test__/scenarios/start-session.js";
-import { Filter } from "./query-filter.js";
+import { Filter } from "./models/query-filter.js";
 
 const cookies = process.env.COOKIES;
 
@@ -38,7 +38,7 @@ test("should fetch first page when created", async () => {
 
   // then
   expect(kindle.defaultBooks).toMatchSnapshot();
-  expect(await kindle.defaultBooks[0].fullDetails()).toMatchSnapshot();
+  expect(await kindle.fullBookDetails(kindle.defaultBooks[0])).toMatchSnapshot();
 });
 
 describe("pagination", () => {

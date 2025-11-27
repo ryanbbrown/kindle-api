@@ -3,14 +3,14 @@
   "license": "MIT",
   "version": "1.4.0",
   "type": "module",
-  "types": "./dist/esm/kindle.d.ts",
-  "main": "./dist/cjs/kindle.js",
-  "module": "./dist/esm/kindle.js",
+  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
   "exports": {
     ".": {
-      "import": "./dist/esm/kindle.js",
-      "require": "./dist/cjs/kindle.js",
-      "types": "./dist/esm/kindle.d.ts"
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
     }
   },
   "scripts": {
@@ -20,9 +20,12 @@
     "build:all": "pnpm run build && pnpm build:cjs && sh ./fixup.sh",
     "build:dev": "pnpm run build --watch",
     "build:production": "pnpm run build:all",
-    "test": "DOTENV_CONFIG_PATH=./.env.test NODE_OPTIONS='-r dotenv/config'  vitest"
+    "test": "DOTENV_CONFIG_PATH=./.env.test NODE_OPTIONS='-r dotenv/config'  vitest",
+    "capture-session": "node --loader ts-node/esm scripts/capture-session.ts",
+    "test-api": "node --loader ts-node/esm -r dotenv/config scripts/test-api.ts"
   },
   "devDependencies": {
+    "@types/node": "^20.12.7",
     "@faker-js/faker": "^8.3.1",
     "@types/json-diff": "^1.0.3",
     "@types/lodash.isequal": "^4.5.8",
@@ -30,6 +33,8 @@
     "json-diff": "^1.0.6",
     "lodash.isequal": "^4.5.0",
     "msw": "^2.1.7",
+    "playwright": "^1.41.1",
+    "ts-node": "^10.9.2",
     "typescript": "^4.9.3",
     "vitest": "^1.2.2"
   }
